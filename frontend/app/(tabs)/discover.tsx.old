@@ -1,0 +1,354 @@
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  FlatList,
+  TouchableOpacity,
+  Image,
+  ActivityIndicator,
+  Alert,
+  TextInput,
+} from 'react-native';
+import { useAuth } from '../../contexts/AuthContext';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import axios from 'axios';
+import Constants from 'expo-constants';
+import * as Location from 'expo-location';
+
+const BACKEND_URL = Constants.expoConfig?.extra?.EXPO_PUBLIC_BACKEND_URL || process.env.EXPO_PUBLIC_BACKEND_URL;
+
+interface Crop {
+  crop_id: string;
+  name: string;
+  description?: string;
+  photos: string[];
+  quantity: number;
+  unit: string;
+  price: number;
+  distance: number;
+  seller: {
+    name: string;
+    profile_photo?: string;
+  };
+}
+
+export default function DiscoverScreen() {
+  const { sessionToken, user } = useAuth();
+  const [crops, setCrops] = useState<Crop[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [radius, setRadius] = useState('10');
+  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
+
+  useEffect(() => {
+    requestLocationPermission();
+  }, []);
+
+  const requestLocationPermission = async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission denied', 'Location permission is required to find nearby crops');
+        setLoading(false);
+        return;
+      }
+
+      const location = await Location.getCurrentPositionAsync({});
+      const coords = {
+        lat: location.coords.latitude,
+        lng: location.coords.longitude,
+      };
+      setUserLocation(coords);
+      loadNearbyCrops(coords, parseFloat(radius));
+    } catch (error) {
+      console.error('Error getting location:', error);
+      Alert.alert('Location Error', 'Could not get your location');
+      setLoading(false);
+    }
+  };
+
+  const loadNearbyCrops = async (location: { lat: number; lng: number }, radiusValue: number) => {
+    try {
+      setLoading(true);
+      const response = await axios.get(
+        `${BACKEND_URL}/api/crops/nearby?lat=${location.lat}&lng=${location.lng}&radius=${radiusValue}`,
+        { headers: { Authorization: `Bearer ${sessionToken}` } }
+      );
+      setCrops(response.data);
+    } catch (error) {
+      console.error('Error loading crops:', error);
+      Alert.alert('Error', 'Could not load nearby crops');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRadiusChange = (value: string) => {
+    setRadius(value);
+    if (userLocation && value) {
+      loadNearbyCrops(userLocation, parseFloat(value));
+    }
+  };
+
+  const handleBuyCrop = async (crop: Crop) => {
+    Alert.alert(
+      'Buy Crop',
+      `Do you want to buy ${crop.name} for $${crop.price}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Buy',
+          onPress: async () => {
+            try {
+              // Navigate to payment screen (simplified for now)
+              Alert.alert('Payment', 'Payment integration coming soon!');
+            } catch (error) {
+              console.error('Error initiating payment:', error);
+              Alert.alert('Error', 'Could not initiate payment');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const renderCrop = ({ item }: { item: Crop }) => (
+    <TouchableOpacity style={styles.cropCard} onPress={() => handleBuyCrop(item)}>
+      {item.photos.length > 0 ? (
+        <Image source={{ uri: item.photos[0] }} style={styles.cropImage} />
+      ) : (
+        <View style={[styles.cropImage, styles.imagePlaceholder]}>
+          <MaterialCommunityIcons name="image-off" size={40} color="#9ca3af" />
+        </View>
+      )}
+
+      <View style={styles.cropInfo}>
+        <Text style={styles.cropName}>{item.name}</Text>
+        {item.description && (
+          <Text style={styles.cropDescription} numberOfLines={2}>
+            {item.description}
+          </Text>
+        )}
+
+        <View style={styles.cropDetails}>
+          <View style={styles.detailRow}>
+            <MaterialCommunityIcons name="weight" size={16} color="#6b7280" />
+            <Text style={styles.detailText}>
+              {item.quantity} {item.unit}
+            </Text>
+          </View>
+          <View style={styles.detailRow}>
+            <MaterialCommunityIcons name="cash" size={16} color="#10b981" />
+            <Text style={styles.priceText}>${item.price}</Text>
+          </View>
+        </View>
+
+        <View style={styles.sellerInfo}>
+          {item.seller.profile_photo ? (
+            <Image source={{ uri: item.seller.profile_photo }} style={styles.sellerAvatar} />
+          ) : (
+            <View style={[styles.sellerAvatar, styles.avatarPlaceholder]}>
+              <MaterialCommunityIcons name="account" size={16} color="#9ca3af" />
+            </View>
+          )}
+          <Text style={styles.sellerName}>{item.seller.name}</Text>
+          <MaterialCommunityIcons name="map-marker" size={14} color="#10b981" />
+          <Text style={styles.distanceText}>{item.distance.toFixed(1)} mi</Text>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+
+  if (!userLocation && !loading) {
+    return (
+      <View style={styles.centerContainer}>
+        <MaterialCommunityIcons name="map-marker-off" size={64} color="#d1d5db" />
+        <Text style={styles.emptyText}>Location access required</Text>
+        <TouchableOpacity style={styles.retryButton} onPress={requestLocationPermission}>
+          <Text style={styles.retryButtonText}>Enable Location</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.filterContainer}>
+        <MaterialCommunityIcons name="map-marker-radius" size={20} color="#10b981" />
+        <Text style={styles.filterLabel}>Radius:</Text>
+        <TextInput
+          style={styles.radiusInput}
+          value={radius}
+          onChangeText={handleRadiusChange}
+          keyboardType="numeric"
+          placeholder="10"
+        />
+        <Text style={styles.filterLabel}>miles</Text>
+      </View>
+
+      {loading ? (
+        <View style={styles.centerContainer}>
+          <ActivityIndicator size="large" color="#10b981" />
+        </View>
+      ) : (
+        <FlatList
+          data={crops}
+          renderItem={renderCrop}
+          keyExtractor={(item) => item.crop_id}
+          contentContainerStyle={styles.listContainer}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <MaterialCommunityIcons name="sprout-outline" size={64} color="#d1d5db" />
+              <Text style={styles.emptyText}>No crops nearby</Text>
+              <Text style={styles.emptySubtext}>Try increasing the search radius</Text>
+            </View>
+          }
+        />
+      )}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#f9fafb',
+  },
+  centerContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  filterContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ffffff',
+    padding: 16,
+    gap: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+  },
+  filterLabel: {
+    fontSize: 16,
+    color: '#374151',
+  },
+  radiusInput: {
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    borderRadius: 8,
+    padding: 8,
+    width: 60,
+    textAlign: 'center',
+  },
+  listContainer: {
+    padding: 16,
+  },
+  cropCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    marginBottom: 16,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  cropImage: {
+    width: '100%',
+    height: 180,
+    backgroundColor: '#e5e7eb',
+  },
+  imagePlaceholder: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  cropInfo: {
+    padding: 16,
+  },
+  cropName: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#1f2937',
+    marginBottom: 4,
+  },
+  cropDescription: {
+    fontSize: 14,
+    color: '#6b7280',
+    marginBottom: 12,
+  },
+  cropDetails: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  detailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  detailText: {
+    fontSize: 14,
+    color: '#6b7280',
+  },
+  priceText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#10b981',
+  },
+  sellerInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#e5e7eb',
+  },
+  sellerAvatar: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+  },
+  avatarPlaceholder: {
+    backgroundColor: '#e5e7eb',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  sellerName: {
+    fontSize: 14,
+    color: '#374151',
+    flex: 1,
+  },
+  distanceText: {
+    fontSize: 12,
+    color: '#10b981',
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 64,
+  },
+  emptyText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#9ca3af',
+    marginTop: 16,
+  },
+  emptySubtext: {
+    fontSize: 14,
+    color: '#d1d5db',
+    marginTop: 8,
+  },
+  retryButton: {
+    backgroundColor: '#10b981',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginTop: 16,
+  },
+  retryButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+});
