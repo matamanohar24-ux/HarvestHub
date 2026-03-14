@@ -58,7 +58,9 @@
         {
           "locationAlwaysAndWhenInUsePermission": "Find nearby crops and growers"
         }
-      ]
+      ],
+      "expo-font",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true

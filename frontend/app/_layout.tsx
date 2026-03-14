@@ -3,7 +3,7 @@ import { AuthProvider, useAuth } from '../contexts/AuthContext';
 import React, { useEffect } from 'react';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 
-function AuthGate() {
+function InitialLayout() {
   const { isAuthenticated, isLoading } = useAuth();
   const router = useRouter();
   const segments = useSegments();
@@ -41,7 +41,7 @@ function AuthGate() {
 export default function RootLayout() {
   return (
     <AuthProvider>
-      <AuthGate />
+      <InitialLayout />
     </AuthProvider>
   );
 }
