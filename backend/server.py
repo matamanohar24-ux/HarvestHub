@@ -12,8 +12,6 @@ import stripe
 import httpx
 import googlemaps
 import math
-import bcrypt
-import re
 
 load_dotenv()
 
@@ -85,7 +83,6 @@ class User(BaseModel):
     followers: List[str] = []  # List of user_ids
     following: List[str] = []  # List of user_ids
     bio: Optional[str] = None
-    password_hash: Optional[str] = None  # For email/password auth
 
 class Product(BaseModel):
     product_id: str
@@ -269,131 +266,7 @@ def calculate_distance(lat1: float, lng1: float, lat2: float, lng2: float) -> fl
     
     return R * c
 
-# ===== REQUEST MODELS FOR AUTH =====
-class RegisterRequest(BaseModel):
-    email: str
-    password: str
-    name: str
-
-class LoginRequest(BaseModel):
-    email: str
-    password: str
-
 # ===== AUTH ENDPOINTS =====
-
-@app.post("/api/auth/register")
-async def register_user(request: RegisterRequest):
-    """Register a new user with email/password"""
-    # Validate email format
-    email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-    if not re.match(email_pattern, request.email):
-        raise HTTPException(status_code=400, detail="Invalid email format")
-    
-    # Check password strength
-    if len(request.password) < 8:
-        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
-    
-    # Check if user exists
-    existing_user = await db.users.find_one({"email": request.email.lower()})
-    if existing_user:
-        raise HTTPException(status_code=400, detail="Email already registered")
-    
-    # Hash password
-    password_hash = bcrypt.hashpw(request.password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-    
-    # Create user
-    user_id = f"user_{uuid.uuid4().hex[:12]}"
-    new_user = {
-        "user_id": user_id,
-        "email": request.email.lower(),
-        "name": request.name,
-        "password_hash": password_hash,
-        "phone": None,
-        "profile_photo": None,
-        "location": None,
-        "zip_code": None,
-        "rating": 0.0,
-        "total_sales": 0,
-        "joined_date": datetime.now(timezone.utc),
-        "verified": False,
-        "followers": [],
-        "following": [],
-        "bio": None
-    }
-    await db.users.insert_one(new_user)
-    
-    # Create session token
-    session_token = f"session_{uuid.uuid4().hex}"
-    await db.user_sessions.insert_one({
-        "user_id": user_id,
-        "session_token": session_token,
-        "expires_at": datetime.now(timezone.utc) + timedelta(days=7),
-        "created_at": datetime.now(timezone.utc)
-    })
-    
-    # Create a clean user response without any potential ObjectId issues
-    user_response = {
-        "user_id": user_id,
-        "email": request.email.lower(),
-        "name": request.name,
-        "phone": None,
-        "profile_photo": None,
-        "location": None,
-        "zip_code": None,
-        "rating": 0.0,
-        "total_sales": 0,
-        "joined_date": datetime.now(timezone.utc).isoformat(),
-        "verified": False,
-        "followers": [],
-        "following": [],
-        "bio": None
-    }
-    
-    return {
-        "session_token": session_token,
-        "user": user_response
-    }
-
-@app.post("/api/auth/login")
-async def login_user(request: LoginRequest):
-    """Login with email/password"""
-    # Find user
-    user = await db.users.find_one({"email": request.email.lower()}, {"_id": 0})
-    
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-    
-    # Check if user has password_hash (email/password user)
-    if not user.get("password_hash"):
-        raise HTTPException(status_code=401, detail="This account uses social login. Please use Google sign-in.")
-    
-    # Verify password
-    if not bcrypt.checkpw(request.password.encode('utf-8'), user["password_hash"].encode('utf-8')):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-    
-    # Create session token
-    session_token = f"session_{uuid.uuid4().hex}"
-    await db.user_sessions.insert_one({
-        "user_id": user["user_id"],
-        "session_token": session_token,
-        "expires_at": datetime.now(timezone.utc) + timedelta(days=7),
-        "created_at": datetime.now(timezone.utc)
-    })
-    
-    # Create clean user response - serialize datetime objects
-    user_response = {}
-    for k, v in user.items():
-        if k in ["password_hash", "_id"]:
-            continue
-        if isinstance(v, datetime):
-            user_response[k] = v.isoformat()
-        else:
-            user_response[k] = v
-    
-    return {
-        "session_token": session_token,
-        "user": user_response
-    }
 
 @app.post("/api/auth/exchange-session")
 async def exchange_session_id(session_id: str = Header(None, alias="X-Session-ID")):

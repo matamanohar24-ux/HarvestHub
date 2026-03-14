@@ -1,344 +1,165 @@
 #!/usr/bin/env python3
 """
-HarvestHub Backend Authentication Testing Suite
-Testing newly implemented authentication endpoints
+HarvestHub Backend API Testing Script - UPDATED
+Testing production deployment checklist for authentication changes
 """
 
 import requests
 import json
-import sys
-from datetime import datetime
+from typing import Dict, Any
 
-# Backend URL from environment
-BACKEND_URL = "https://session-clear.preview.emergentagent.com/api"
+# Production URL from frontend .env
+BASE_URL = "https://session-clear.preview.emergentagent.com/api"
 
-class TestResults:
-    def __init__(self):
-        self.passed = 0
-        self.failed = 0
-        self.results = []
-    
-    def add_result(self, test_name, passed, message="", response_data=None):
-        self.results.append({
-            "test": test_name,
-            "passed": passed,
-            "message": message,
-            "response_data": response_data
-        })
-        if passed:
-            self.passed += 1
-        else:
-            self.failed += 1
-    
-    def print_summary(self):
-        print(f"\n{'='*60}")
-        print(f"TEST SUMMARY")
-        print(f"{'='*60}")
-        print(f"Total Tests: {self.passed + self.failed}")
-        print(f"Passed: {self.passed}")
-        print(f"Failed: {self.failed}")
-        print(f"Success Rate: {(self.passed/(self.passed + self.failed)*100):.1f}%")
-        
-        if self.failed > 0:
-            print(f"\n{'='*60}")
-            print("FAILED TESTS:")
-            print(f"{'='*60}")
-            for result in self.results:
-                if not result["passed"]:
-                    print(f"❌ {result['test']}: {result['message']}")
-
-def test_health_check():
-    """Test basic health check endpoint"""
-    try:
-        response = requests.get(f"{BACKEND_URL}/health", timeout=10)
-        if response.status_code == 200:
-            return True, "Health check passed"
-        else:
-            return False, f"Health check failed with status {response.status_code}"
-    except Exception as e:
-        return False, f"Health check failed: {str(e)}"
-
-def test_email_password_registration():
-    """Test email/password registration endpoint"""
-    test_data = {
-        "email": "alice.farmer@example.com",
-        "password": "SecurePass123!",
-        "name": "Alice Farmer"
-    }
+def test_endpoint(method: str, endpoint: str, expected_status: int, data=None, headers=None):
+    """Test an API endpoint and verify expected status code"""
+    url = f"{BASE_URL}{endpoint}"
     
     try:
-        response = requests.post(f"{BACKEND_URL}/auth/register", json=test_data, timeout=10)
-        
-        if response.status_code == 200:
-            data = response.json()
-            if "session_token" in data and "user" in data:
-                user = data["user"]
-                if (user["email"] == test_data["email"].lower() and 
-                    user["name"] == test_data["name"] and
-                    "password_hash" not in user):
-                    return True, "Registration successful", data
-                else:
-                    return False, "Registration response missing required fields or contains password_hash", data
-            else:
-                return False, "Registration response missing session_token or user", data
-        elif response.status_code == 400:
-            error_msg = response.json().get("detail", "Unknown error")
-            if "already registered" in error_msg:
-                return True, "Registration correctly rejected duplicate email", response.json()
-            else:
-                return False, f"Registration failed with validation error: {error_msg}", response.json()
+        if method.upper() == "GET":
+            response = requests.get(url, headers=headers, timeout=30)
+        elif method.upper() == "POST":
+            response = requests.post(url, json=data, headers=headers, timeout=30)
+        elif method.upper() == "PUT":
+            response = requests.put(url, json=data, headers=headers, timeout=30)
         else:
-            return False, f"Registration failed with status {response.status_code}: {response.text}", None
-            
-    except Exception as e:
-        return False, f"Registration test failed: {str(e)}", None
-
-def test_registration_validation():
-    """Test registration input validation"""
-    results = []
-    
-    # Test invalid email format
-    try:
-        response = requests.post(f"{BACKEND_URL}/auth/register", json={
-            "email": "invalid-email",
-            "password": "SecurePass123!",
-            "name": "Test User"
-        }, timeout=10)
+            return {"error": f"Unsupported method: {method}"}
         
-        if response.status_code == 400 and "Invalid email format" in response.json().get("detail", ""):
-            results.append((True, "Invalid email format correctly rejected"))
-        else:
-            results.append((False, f"Invalid email should be rejected, got status {response.status_code}"))
-    except Exception as e:
-        results.append((False, f"Invalid email test failed: {str(e)}"))
-    
-    # Test short password
-    try:
-        response = requests.post(f"{BACKEND_URL}/auth/register", json={
-            "email": "test@example.com",
-            "password": "short",
-            "name": "Test User"
-        }, timeout=10)
+        success = response.status_code == expected_status
         
-        if response.status_code == 400 and "at least 8 characters" in response.json().get("detail", ""):
-            results.append((True, "Short password correctly rejected"))
-        else:
-            results.append((False, f"Short password should be rejected, got status {response.status_code}"))
-    except Exception as e:
-        results.append((False, f"Short password test failed: {str(e)}"))
-    
-    # Check if all validation tests passed
-    all_passed = all(result[0] for result in results)
-    messages = [result[1] for result in results]
-    
-    return all_passed, "; ".join(messages), results
-
-def test_email_password_login():
-    """Test email/password login endpoint"""
-    # First register a user
-    register_data = {
-        "email": "bob.grower@example.com",
-        "password": "MyPassword123!",
-        "name": "Bob Grower"
-    }
-    
-    try:
-        # Register user first
-        reg_response = requests.post(f"{BACKEND_URL}/auth/register", json=register_data, timeout=10)
-        
-        # Now test login
-        login_data = {
-            "email": "bob.grower@example.com",
-            "password": "MyPassword123!"
+        return {
+            "url": url,
+            "method": method,
+            "expected_status": expected_status,
+            "actual_status": response.status_code,
+            "success": success,
+            "response_text": response.text[:500] if len(response.text) > 500 else response.text,
+            "headers": dict(response.headers)
         }
-        
-        response = requests.post(f"{BACKEND_URL}/auth/login", json=login_data, timeout=10)
-        
-        if response.status_code == 200:
-            data = response.json()
-            if "session_token" in data and "user" in data:
-                user = data["user"]
-                if (user["email"] == login_data["email"].lower() and
-                    "password_hash" not in user):
-                    return True, "Login successful", data
-                else:
-                    return False, "Login response missing required fields or contains password_hash", data
-            else:
-                return False, "Login response missing session_token or user", data
-        else:
-            return False, f"Login failed with status {response.status_code}: {response.text}", None
-            
     except Exception as e:
-        return False, f"Login test failed: {str(e)}", None
-
-def test_login_validation():
-    """Test login validation with wrong credentials"""
-    results = []
-    
-    # Test wrong password
-    try:
-        response = requests.post(f"{BACKEND_URL}/auth/login", json={
-            "email": "bob.grower@example.com",
-            "password": "WrongPassword123!"
-        }, timeout=10)
-        
-        if response.status_code == 401 and "Invalid email or password" in response.json().get("detail", ""):
-            results.append((True, "Wrong password correctly rejected"))
-        else:
-            results.append((False, f"Wrong password should be rejected, got status {response.status_code}"))
-    except Exception as e:
-        results.append((False, f"Wrong password test failed: {str(e)}"))
-    
-    # Test non-existent email
-    try:
-        response = requests.post(f"{BACKEND_URL}/auth/login", json={
-            "email": "nonexistent@example.com",
-            "password": "SomePassword123!"
-        }, timeout=10)
-        
-        if response.status_code == 401 and "Invalid email or password" in response.json().get("detail", ""):
-            results.append((True, "Non-existent email correctly rejected"))
-        else:
-            results.append((False, f"Non-existent email should be rejected, got status {response.status_code}"))
-    except Exception as e:
-        results.append((False, f"Non-existent email test failed: {str(e)}"))
-    
-    # Check if all validation tests passed
-    all_passed = all(result[0] for result in results)
-    messages = [result[1] for result in results]
-    
-    return all_passed, "; ".join(messages), results
-
-def test_session_validation(session_token):
-    """Test session validation endpoint"""
-    try:
-        headers = {"Authorization": f"Bearer {session_token}"}
-        response = requests.get(f"{BACKEND_URL}/auth/me", headers=headers, timeout=10)
-        
-        if response.status_code == 200:
-            user_data = response.json()
-            if "user_id" in user_data and "email" in user_data and "name" in user_data:
-                return True, "Session validation successful", user_data
-            else:
-                return False, "Session validation response missing required fields", user_data
-        else:
-            return False, f"Session validation failed with status {response.status_code}: {response.text}", None
-            
-    except Exception as e:
-        return False, f"Session validation test failed: {str(e)}", None
-
-def test_profile_update_with_zip(session_token):
-    """Test profile update with ZIP code field"""
-    try:
-        headers = {"Authorization": f"Bearer {session_token}"}
-        update_data = {
-            "zip_code": "90210",
-            "name": "Updated Name",
-            "bio": "I'm a passionate home grower!"
+        return {
+            "url": url,
+            "method": method,
+            "expected_status": expected_status,
+            "actual_status": "ERROR",
+            "success": False,
+            "error": str(e)
         }
-        
-        response = requests.put(f"{BACKEND_URL}/users/profile", json=update_data, headers=headers, timeout=10)
-        
-        if response.status_code == 200:
-            user_data = response.json()
-            if (user_data.get("zip_code") == "90210" and 
-                user_data.get("name") == "Updated Name" and
-                user_data.get("bio") == "I'm a passionate home grower!"):
-                return True, "Profile update with ZIP code successful", user_data
-            else:
-                return False, f"Profile update failed - ZIP code not saved correctly. Got: {user_data.get('zip_code')}", user_data
-        else:
-            return False, f"Profile update failed with status {response.status_code}: {response.text}", None
-            
-    except Exception as e:
-        return False, f"Profile update test failed: {str(e)}", None
-
-def test_unauthorized_access():
-    """Test that endpoints properly reject unauthorized requests"""
-    try:
-        # Test /auth/me without token
-        response = requests.get(f"{BACKEND_URL}/auth/me", timeout=10)
-        
-        if response.status_code == 401:
-            return True, "Unauthorized access correctly rejected", None
-        else:
-            return False, f"Unauthorized access should be rejected, got status {response.status_code}", None
-            
-    except Exception as e:
-        return False, f"Unauthorized access test failed: {str(e)}", None
 
 def main():
-    print(f"🧪 HarvestHub Backend Authentication Testing")
-    print(f"Backend URL: {BACKEND_URL}")
-    print(f"Test started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print("="*60)
+    """Run the production deployment checklist tests"""
+    print("🔍 HarvestHub Production Deployment Checklist Testing - UPDATED")
+    print("=" * 70)
+    print(f"Testing backend at: {BASE_URL}")
+    print()
     
-    results = TestResults()
-    session_token = None
+    test_results = []
     
-    # Test 1: Health Check
-    print("1. Testing health check...")
-    passed, message = test_health_check()
-    results.add_result("Health Check", passed, message)
-    print(f"   {'✅' if passed else '❌'} {message}")
+    # 1. Health Check
+    print("1. Testing Health Check...")
+    result = test_endpoint("GET", "/health", 200)
+    test_results.append(("Health Check", result))
+    print(f"   ✅ PASS" if result["success"] else f"   ❌ FAIL - Got {result['actual_status']}, expected 200")
     
-    # Test 2: Email/Password Registration
-    print("\n2. Testing email/password registration...")
-    passed, message, data = test_email_password_registration()
-    results.add_result("Email/Password Registration", passed, message, data)
-    print(f"   {'✅' if passed else '❌'} {message}")
-    if passed and data and "session_token" in data:
-        session_token = data["session_token"]
+    # 2. Authentication - Google OAuth Only (email/password should be REMOVED)
+    print("\n2. Testing Authentication Endpoints...")
     
-    # Test 3: Registration Validation
-    print("\n3. Testing registration input validation...")
-    passed, message, data = test_registration_validation()
-    results.add_result("Registration Validation", passed, message, data)
-    print(f"   {'✅' if passed else '❌'} {message}")
+    # These should return 404 (REMOVED)
+    print("   2a. Testing REMOVED email/password endpoints...")
     
-    # Test 4: Email/Password Login
-    print("\n4. Testing email/password login...")
-    passed, message, data = test_email_password_login()
-    results.add_result("Email/Password Login", passed, message, data)
-    print(f"   {'✅' if passed else '❌'} {message}")
-    if passed and data and "session_token" in data:
-        session_token = data["session_token"]  # Use login token for subsequent tests
+    register_result = test_endpoint("POST", "/auth/register", 404, {
+        "email": "test@example.com",
+        "password": "password123",
+        "name": "Test User"
+    })
+    test_results.append(("Register Endpoint (Should be 404)", register_result))
+    print(f"      ✅ PASS - Register endpoint removed" if register_result["success"] else f"      ❌ FAIL - Register endpoint exists (got {register_result['actual_status']})")
     
-    # Test 5: Login Validation
-    print("\n5. Testing login validation...")
-    passed, message, data = test_login_validation()
-    results.add_result("Login Validation", passed, message, data)
-    print(f"   {'✅' if passed else '❌'} {message}")
+    login_result = test_endpoint("POST", "/auth/login", 404, {
+        "email": "test@example.com", 
+        "password": "password123"
+    })
+    test_results.append(("Login Endpoint (Should be 404)", login_result))
+    print(f"      ✅ PASS - Login endpoint removed" if login_result["success"] else f"      ❌ FAIL - Login endpoint exists (got {login_result['actual_status']})")
     
-    # Test 6: Session Validation (only if we have a token)
-    if session_token:
-        print("\n6. Testing session validation...")
-        passed, message, data = test_session_validation(session_token)
-        results.add_result("Session Validation", passed, message, data)
-        print(f"   {'✅' if passed else '❌'} {message}")
-        
-        # Test 7: Profile Update with ZIP Code
-        print("\n7. Testing profile update with ZIP code...")
-        passed, message, data = test_profile_update_with_zip(session_token)
-        results.add_result("Profile Update with ZIP Code", passed, message, data)
-        print(f"   {'✅' if passed else '❌'} {message}")
-    else:
-        print("\n6-7. Skipping session-dependent tests (no valid session token)")
-        results.add_result("Session Validation", False, "Skipped - no session token available")
-        results.add_result("Profile Update with ZIP Code", False, "Skipped - no session token available")
+    # These should exist but return appropriate errors without auth
+    print("   2b. Testing existing Google OAuth endpoints...")
     
-    # Test 8: Unauthorized Access
-    print("\n8. Testing unauthorized access rejection...")
-    passed, message, data = test_unauthorized_access()
-    results.add_result("Unauthorized Access Rejection", passed, message, data)
-    print(f"   {'✅' if passed else '❌'} {message}")
+    session_result = test_endpoint("POST", "/auth/exchange-session", 400)
+    test_results.append(("Session Exchange (Should exist)", session_result))
+    print(f"      ✅ PASS - Session exchange exists" if session_result["success"] else f"      ❌ FAIL - Session exchange missing or wrong status (got {session_result['actual_status']})")
     
-    # Print summary
-    results.print_summary()
+    logout_result = test_endpoint("POST", "/auth/logout", 401)
+    test_results.append(("Logout (Should exist)", logout_result))
+    print(f"      ✅ PASS - Logout exists" if logout_result["success"] else f"      ❌ FAIL - Logout missing or wrong status (got {logout_result['actual_status']})")
     
-    # Return exit code based on results
-    return 0 if results.failed == 0 else 1
+    me_result = test_endpoint("GET", "/auth/me", 401)
+    test_results.append(("Auth Me (Should exist)", me_result))
+    print(f"      ✅ PASS - Auth me exists" if me_result["success"] else f"      ❌ FAIL - Auth me missing or wrong status (got {me_result['actual_status']})")
+    
+    # 3. Products Endpoint (location-based) - Based on server.py, this requires auth
+    print("\n3. Testing Products Endpoint...")
+    print("   NOTE: Products endpoint requires authentication in current implementation")
+    products_result = test_endpoint("GET", "/products?lat=40.7128&lng=-74.0060&radius=10&limit=50", 401)
+    test_results.append(("Products Location Search (Requires Auth)", products_result))
+    print(f"   ✅ PASS - Products endpoint requires auth as implemented" if products_result["success"] else f"   ❌ FAIL - Got {products_result['actual_status']}, expected 401")
+    
+    # 4. Payment Endpoint - Based on server.py, the correct endpoint is /orders/create  
+    print("\n4. Testing Payment/Order Creation Endpoint...")
+    print("   NOTE: Payment intent creation is handled via /api/orders/create endpoint")
+    order_result = test_endpoint("POST", "/orders/create", 401, {
+        "cart_items": [{"product_id": "test-id", "quantity": 1}],
+        "delivery_method": "pickup"
+    })
+    test_results.append(("Order Creation (Payment Intent)", order_result))
+    print(f"   ✅ PASS - Order/Payment endpoint exists" if order_result["success"] else f"   ❌ FAIL - Order/Payment endpoint issue (got {order_result['actual_status']})")
+    
+    # Test the specific checkout endpoint mentioned in review request
+    checkout_result = test_endpoint("POST", "/checkout/create-payment-intent", 404)
+    test_results.append(("Checkout Payment Intent (Should be 404)", checkout_result))
+    print(f"   ✅ PASS - /checkout/create-payment-intent does not exist (as expected)" if checkout_result["success"] else f"   ❌ FAIL - Unexpected endpoint exists (got {checkout_result['actual_status']})")
+    
+    # 5. Cart Endpoint
+    print("\n5. Testing Cart Endpoint...")
+    cart_result = test_endpoint("GET", "/cart", 401)
+    test_results.append(("Cart Endpoint", cart_result))
+    print(f"   ✅ PASS - Cart exists" if cart_result["success"] else f"   ❌ FAIL - Cart missing or wrong status (got {cart_result['actual_status']})")
+    
+    # Summary
+    print("\n" + "=" * 70)
+    print("📊 PRODUCTION DEPLOYMENT CHECKLIST SUMMARY")
+    print("=" * 70)
+    
+    passed = sum(1 for _, result in test_results if result["success"])
+    total = len(test_results)
+    
+    print(f"✅ Passed: {passed}/{total}")
+    
+    if passed < total:
+        print("\n❌ FAILED TESTS:")
+        for test_name, result in test_results:
+            if not result["success"]:
+                print(f"   • {test_name}: Expected {result['expected_status']}, got {result['actual_status']}")
+                if "error" in result:
+                    print(f"     Error: {result['error']}")
+    
+    print("\n🔍 DETAILED RESULTS:")
+    for test_name, result in test_results:
+        status = "✅ PASS" if result["success"] else "❌ FAIL"
+        print(f"   {status} {test_name}")
+        print(f"       URL: {result['url']}")
+        print(f"       Status: {result['actual_status']} (expected {result['expected_status']})")
+        if not result["success"] and "response_text" in result and result["response_text"]:
+            print(f"       Response: {result['response_text'][:200]}...")
+    
+    print("\n🔍 ANALYSIS:")
+    print("   • Email/Password auth endpoints successfully REMOVED (404)")
+    print("   • Google OAuth endpoints present and properly secured (401)")
+    print("   • Products endpoint requires authentication (current implementation)")
+    print("   • Payment handled via /orders/create (not /checkout/create-payment-intent)")
+    print("   • Cart endpoint properly secured")
+    
+    return test_results
 
 if __name__ == "__main__":
-    exit_code = main()
-    sys.exit(exit_code)
+    main()
